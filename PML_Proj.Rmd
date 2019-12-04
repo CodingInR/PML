@@ -1,0 +1,139 @@
+---
+title: "PML Course Project"
+author: "CodingInR"
+date: "11/27/2019"
+output: 
+    md_document
+---
+
+```{r setup, include=FALSE, cache=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+We're exploring a lifigting data set, where barbell lifts were done correctly, and then incorrectly in 5 different ways. Data comes from the Weight Lifting Exercise Data set at: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+Per the website/paper, the authors tell us that there are 6 participants "performin"one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)."
+
+Class A is the specified exercise, and the other 4 represent common mistakes.
+
+```{r setups, echo=TRUE, results = "hide", message=FALSE}
+library(caret)
+library(corrplot)
+library(randomForest)
+library(e1071)
+library(corrplot)
+library(skimr)
+library(doParallel)
+set.seed(2002)
+##paraellell processing
+cl <- makePSOCKcluster(16)
+registerDoParallel(cl)
+```
+
+## Read in the Data
+
+```{r pressure, results='hide', cache = 2}
+URL_Train <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+URL_Test <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+training <- read.csv(url(URL_Train))
+testing <- read.csv(url(URL_Test))
+```
+## Exploratory
+
+```{r exploratory}
+
+table(training$classe)
+## ok, somewhat evenly spread across categories, though A has a bit more...
+sum(is.na(training))/prod(dim(training))
+## there is a significant amount of missing data here, so we need do some cleaning since most models will choke on NAs
+
+```
+## Cleaning/prep
+
+```{r clean}
+##Let's start by looking at variables with little to no variance, and then removing variabels with missing data. Just viewing the data, we can see that generally when a column has NAs, it has a vast majority of NA's. We will assume that removing these will have little end effect on the prediction model(s).
+##before
+dim(training)
+ltnv <- caret::nearZeroVar(training)
+training <- training[,-ltnv]
+testing <- testing[,-ltnv]
+training_cleaned <- training[,colSums(is.na(training))==0]
+testing_cleaned <- testing[,colSums(is.na(testing))==0]
+##remove time/names
+training_cleaned <- training_cleaned[,-c(1:7)]
+testing_cleaned <- testing_cleaned[,-c(1:7)]
+##create partition at 70%. Doing this as the 'final' test set at only 20, is small relative to the overall data set. I want to avoid over-fitting, so will use a preliminary test set.
+inTrain <- caret::createDataPartition(y=training_cleaned$classe,p=0.7,list = FALSE)
+trn <- training_cleaned[inTrain,]
+tst <- training_cleaned[-inTrain,]
+##after
+dim(training_cleaned)
+## Summary
+
+```
+
+## Looking for correlating relationships and selecting features
+
+``` {r cors}
+
+#correlation matrix of features
+cor_trn <- round(cor(subset(trn, select = -classe)),2)
+corrplot::corrplot(cor_trn, method= "color", order = "hclust")
+##too many features, we need to reduce
+##subset to the attributes that are highy correlated
+HC <- caret::findCorrelation(cor_trn, cutoff = 0.5)
+cor_trn_sub <- cor_trn[-HC,-HC]
+##Getting much better after removing the most correlated features
+trnFinal <- trn[,-HC]
+tstFinal <- tst[,-HC]
+skimr::skim_to_wide(trnFinal)
+```
+
+## Model
+
+Using random forest as the authors also selected due to the high number of values. Though the paper doesn't detail methodology, we will compare results. It is likely they will be different, as I have significantly subset the number of features.
+
+## Random Forest
+```{r modla, cache=TRUE, warning=FALSE}
+## Using k-fold defaults
+TC <- caret::trainControl(method = "cv", number = 3, verboseIter = FALSE)
+## warning! takes a while to process!
+train_out <- caret::train(classe~., data = trnFinal, method = "rf", metric = "Accuracy", trConrol = TC)
+## Model Summary:
+train_out$finalModel
+plot(train_out)
+## Let's apply our model to predict our test set now:
+predict_out <- predict(train_out, newdata = tstFinal)
+pred_CM <- confusionMatrix(predict_out, tstFinal$classe)
+pred_CM
+plot(train_out)
+## This is VERY high, so concerned we over-fitted...
+
+```
+##
+```{r modlb, cache = TRUE}
+## Let's try another model: K Kearest Neighbor  (method = "knn")
+TC2 <- caret::trainControl(method = "cv", number =15, verboseIter = FALSE)
+nn <- caret::train(classe~.,method = "knn", data=trnFinal, tuneLength = 15, trControl = TC2)
+nn
+plot(nn)
+## not as good, but far less of a chance of overfit. Let's look at prediction
+predict_out2 <- predict(nn, newdata = tstFinal)
+pred_CM2 <- confusionMatrix(predict_out2, tstFinal$classe)
+pred_CM2
+predictors(nn)
+## Stop parallel workers
+stopCluster(cl)
+```
+
+## Conclusion
+Random forest seemed to build a highly accurate model (~98%), but has the warning signs of over-fitting and took ~15minutes on a core i7 to process. KNN processed much more quickly, but was less accurate (~82%) - though i only did minor tuning, and it could probably be improved. In Both cases, the rank order of predictor variables is the same and there is evidence that the top handful of predictors have an outset influence on outcome.
+
+## Citation:
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+	
+	
+	
