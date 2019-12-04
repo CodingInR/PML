@@ -1,6 +1,8 @@
 Overview
 --------
 
+HTML <a href="https://github.com/CodingInR/PML/blob/master/PML_Proj.html" class="uri"> Link</a>
+
 We’re exploring a lifigting data set, where barbell lifts were done
 correctly, and then incorrectly in 5 different ways. Data comes from the
 Weight Lifting Exercise Data set at:
